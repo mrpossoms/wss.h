@@ -1,11 +1,11 @@
-# clbp
+# wss.h
 ![C/C++ CI](https://github.com/mrpossoms/clbp/workflows/C/C++%20CI/badge.svg)
 
-C Library Boilerplate is a starting point for C/C++ library projects and includes a functionally minimal makefile, dependency management tooling config, directory structures, automatic code formatting, and unit testing infrastructure.
+wss.h is an unopinionated, single headerfile websocket server library intended to make life easier when incorporating websocket connections into an existing socket server implementation. wss.h provides only helper functions that facilitate the basics such as handshaking, encoding and decoding frames. 
 
 ## Requirements
 
-To best utilize this boilerplate please ensure you have installed the following
+To run tests and generate documentation please ensure you have installed the following
 * Python3+
 * Pip
 * C/C++ toolchain
@@ -28,8 +28,6 @@ everything you could want to do. This includes fetching, installing and
 building dependencies, building documentation and of course the software
 itself. Helpful make rules include the following.
 
-* `static` - Build project as a static library.
-* `shared` - Build project as a shared library .
 * `test` - Build and run the test suite
 * `format` - Run clang-format explicitly (normally executed as a pre-commit
   hook).
