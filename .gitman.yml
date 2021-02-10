@@ -1,0 +1,18 @@
+location: gitman_sources
+sources:
+  - name: xmath.h
+    type: git
+    repo: https://github.com/AdvancedSpace/xmath.h
+    sparse_paths:
+      -
+    rev: master
+    link: deps/xmath.h 
+    # Use scripts to run shell commands after the repo is checked out.
+    # This can include build processes
+    scripts:
+      -
+sources_locked:
+  - 
+default_group: ''
+groups:
+  -
