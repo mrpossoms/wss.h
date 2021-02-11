@@ -21,6 +21,47 @@
 #include <string.h>
 
 
+typedef enum
+{
+	WSS_OPCODE_CONT_FRAME = 0x0,
+	WSS_OPCODE_TEXT_FRAME = 0x1,
+	WSS_OPCODE_BIN_FRAME  = 0x2,
+	WSS_OPCODE_NON_CTRL0  = 0x3,
+	WSS_OPCODE_NON_CTRL1  = 0x4,
+	WSS_OPCODE_NON_CTRL2  = 0x5,
+	WSS_OPCODE_NON_CTRL3  = 0x6,
+	WSS_OPCODE_NON_CTRL4  = 0x7,
+	WSS_OPCODE_CLOSE_CON  = 0x8,
+	WSS_OPCODE_PING       = 0x9,
+	WSS_OPCODE_PONG       = 0xA,
+	WSS_OPCODE_CTRL0      = 0xB,
+	WSS_OPCODE_CTRL1      = 0xC,
+	WSS_OPCODE_CTRL2      = 0xD,
+	WSS_OPCODE_CTRL3      = 0xF,
+} wss_frame_opcode_t;
+
+
+typedef struct
+{
+	uint32_t fin         : 1;
+	uint32_t rsv         : 3;
+	uint32_t opcode      : 4;
+	uint32_t mask        : 1;
+	uint32_t payload_len : 7;
+} wss_frame_hdr_t;
+
+
+typedef struct
+{
+	wss_frame_hdr_t hdr;
+	union {
+		uint16_t len16;
+		uint64_t len64;
+	} ex_payload_len;
+	uint32_t masking_key;
+} wss_frame_t;
+
+
 typedef struct
 {
     uint32_t state[5];
@@ -35,6 +76,69 @@ void SHA1Update(SHA1_CTX * context, const unsigned char *data, uint32_t len);
 void SHA1Final(unsigned char digest[20], SHA1_CTX * context);
 void SHA1(char *hash_out, const char *str, int len);
 void base64_encode(void *dst, const void *src, size_t len);
+
+
+ssize_t wss_read_frame(int sock, void* dst, size_t ex_len)
+{
+	wss_frame_t frame;
+#ifdef WSS_H_TEST
+	ssize_t frame_bytes = read(sock, &frame.hdr, sizeof(frame.hdr));
+#else
+	ssize_t frame_bytes = recv(sock, &frame.hdr, sizeof(frame.hdr), 0);
+#endif
+
+	if (frame_bytes != sizeof(frame)) { return -1; /* Something foul happened when reading */ }
+
+	if (frame.hdr.rsv != 0) { return -2; /* non-zero rsv bits should cause a connection failure */}
+
+	// TODO
+	switch (frame.hdr.opcode)
+	{
+		case WSS_OPCODE_CONT_FRAME:
+			break;
+		case WSS_OPCODE_TEXT_FRAME:
+			break;
+		case WSS_OPCODE_BIN_FRAME:
+			break;
+		case WSS_OPCODE_CLOSE_CON:
+			break;
+		case WSS_OPCODE_PING:
+			break;
+		case WSS_OPCODE_PONG:
+			break;     
+		default:
+			break;
+	}
+
+	if (frame.hdr.payload_len == 126)
+	{
+#ifdef WSS_H_TEST
+		ssize_t pay_len_bytes = read(sock, &frame.ex_payload_len.len16, sizeof(uint16_t));
+#else
+		ssize_t pay_len_bytes = recv(sock, &frame.ex_payload_len.len16, sizeof(uint16_t), 0);
+#endif
+		if (pay_len_bytes != sizeof(uint16_t)) { return -3; }
+	}
+	else if (frame.hdr.payload_len == 127)
+	{
+#ifdef WSS_H_TEST
+		ssize_t pay_len_bytes = read(sock, &frame.ex_payload_len.len64, sizeof(uint64_t));
+#else
+		ssize_t pay_len_bytes = recv(sock, &frame.ex_payload_len.len64, sizeof(uint64_t), 0);
+#endif
+		if (pay_len_bytes != sizeof(uint64_t)) { return -3; }
+	}
+
+	if (frame.hdr.mask)
+	{
+#ifdef WSS_H_TEST
+		ssize_t mask_bytes = read(sock, &frame.mask, sizeof(uint32_t));
+#else
+		ssize_t mask_bytes = recv(sock, &frame.mask, sizeof(uint32_t), 0);
+#endif
+		if (mask_bytes != sizeof(uint32_t)) { return -4; }
+	}
+}
 
 
 void wss_compute_accept(char key[24], char accept[28])
