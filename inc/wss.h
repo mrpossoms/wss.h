@@ -10,6 +10,11 @@
 
 #ifndef __WSS_H__
 
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/select.h>
+#include <netinet/tcp.h>
+#include <netdb.h>
 #include <string.h>
 
 #ifndef WSS_MAX_HDRS
@@ -38,16 +43,19 @@ int wss_handshake_get_req(
 {
 	char buf[1024] = {};
 
+#ifdef WSS_H_TEST
+	ssize_t bytes_peeked = read(sock, buf, sizeof(buf));
+#else
 	ssize_t bytes_peeked = recv(sock, buf, sizeof(buf), MSG_PEEK | MSG_DONTWAIT);
+#endif
 
 	if (bytes_peeked == 0) { return -1; /* no data yet */ }
 	if (bytes_peeked == -1) { return -2; /* error occured when peeking */ }
 
 	char* line_saveptr;
 	char* req_str = buf;
-	for (char* line; !line; req_str = NULL)
+	for (char* line; (line = strtok_r(req_str, "\r\n", &line_saveptr)); req_str = NULL)
 	{
-		line = strtok_r(req_str, "\r\n", &line_saveptr);
 
 		if (req_str)
 		{ // for the first line of the "request"
@@ -56,9 +64,8 @@ int wss_handshake_get_req(
 
 			char *part_saveptr, *http_str = line;
 			
-			for (char* part; !part; http_str = NULL)
+			for (char* part; (part = strtok_r(http_str, " ", &part_saveptr)); http_str = NULL)
 			{
-				part = strtok_r(http_str, " ", &part_saveptr);
 				if (part[0] == '/')
 				{
 					// this seems to be the route part of the http line. Invoke the route
