@@ -19,6 +19,7 @@
 #include <netinet/tcp.h>
 #include <netdb.h>
 #include <string.h>
+#include <assert.h>
 
 
 typedef enum
@@ -43,11 +44,11 @@ typedef enum
 
 typedef struct
 {
-	uint32_t fin         : 1;
-	uint32_t rsv         : 3;
-	uint32_t opcode      : 4;
-	uint32_t mask        : 1;
-	uint32_t payload_len : 7;
+	uint16_t opcode      : 4;
+	uint16_t rsv         : 3;
+	uint16_t fin         : 1;
+	uint16_t payload_len : 7;
+	uint16_t mask        : 1;
 } wss_frame_hdr_t;
 
 
@@ -81,13 +82,9 @@ void base64_encode(void *dst, const void *src, size_t len);
 ssize_t wss_read_frame(int sock, void* dst, size_t ex_len)
 {
 	wss_frame_t frame;
-#ifdef WSS_H_TEST
 	ssize_t frame_bytes = read(sock, &frame.hdr, sizeof(frame.hdr));
-#else
-	ssize_t frame_bytes = recv(sock, &frame.hdr, sizeof(frame.hdr), 0);
-#endif
 
-	if (frame_bytes != sizeof(frame)) { return -1; /* Something foul happened when reading */ }
+	if (frame_bytes != sizeof(frame.hdr)) { return -1; /* Something foul happened when reading */ }
 
 	if (frame.hdr.rsv != 0) { return -2; /* non-zero rsv bits should cause a connection failure */}
 
@@ -95,53 +92,74 @@ ssize_t wss_read_frame(int sock, void* dst, size_t ex_len)
 	switch (frame.hdr.opcode)
 	{
 		case WSS_OPCODE_CONT_FRAME:
+			dprintf(STDERR_FILENO, "WSS_OPCODE_CONT_FRAME\n");
 			break;
 		case WSS_OPCODE_TEXT_FRAME:
+			dprintf(STDERR_FILENO, "WSS_OPCODE_TEXT_FRAME\n");
 			break;
 		case WSS_OPCODE_BIN_FRAME:
+			dprintf(STDERR_FILENO, "WSS_OPCODE_BIN_FRAME\n");
 			break;
 		case WSS_OPCODE_CLOSE_CON:
+			dprintf(STDERR_FILENO, "WSS_OPCODE_CLOSE_CON\n");
 			break;
 		case WSS_OPCODE_PING:
+			dprintf(STDERR_FILENO, "WSS_OPCODE_PING\n");
 			break;
 		case WSS_OPCODE_PONG:
+			dprintf(STDERR_FILENO, "WSS_OPCODE_PONG\n");
 			break;     
 		default:
 			break;
 	}
 
+	// determine the payload length and read the appropriate payload
+	// size value.
+	size_t payload_len = frame.hdr.payload_len;
 	if (frame.hdr.payload_len == 126)
 	{
-#ifdef WSS_H_TEST
 		ssize_t pay_len_bytes = read(sock, &frame.ex_payload_len.len16, sizeof(uint16_t));
-#else
-		ssize_t pay_len_bytes = recv(sock, &frame.ex_payload_len.len16, sizeof(uint16_t), 0);
-#endif
+
 		if (pay_len_bytes != sizeof(uint16_t)) { return -3; }
+		payload_len = frame.ex_payload_len.len16;
 	}
 	else if (frame.hdr.payload_len == 127)
 	{
-#ifdef WSS_H_TEST
 		ssize_t pay_len_bytes = read(sock, &frame.ex_payload_len.len64, sizeof(uint64_t));
-#else
-		ssize_t pay_len_bytes = recv(sock, &frame.ex_payload_len.len64, sizeof(uint64_t), 0);
-#endif
+
 		if (pay_len_bytes != sizeof(uint64_t)) { return -3; }
+		payload_len = frame.ex_payload_len.len64;
 	}
 
+	// since one is specified, read the mask key
 	if (frame.hdr.mask)
 	{
-#ifdef WSS_H_TEST
-		ssize_t mask_bytes = read(sock, &frame.mask, sizeof(uint32_t));
-#else
-		ssize_t mask_bytes = recv(sock, &frame.mask, sizeof(uint32_t), 0);
-#endif
+		ssize_t mask_bytes = read(sock, &frame.masking_key, sizeof(uint32_t));
+
+		// frame.masking_key = ntohl(frame.masking_key);
+		dprintf(STDERR_FILENO, "masking_key: %x\n", frame.masking_key);
 		if (mask_bytes != sizeof(uint32_t)) { return -4; }
 	}
+
+	size_t read_len = ex_len < payload_len ? ex_len : payload_len;
+	size_t bytes_read = read(sock, dst, read_len);
+
+	// if the frame is masked, unmask the payload here
+	if (frame.hdr.mask)
+	{
+		char* payload = (char*)dst;
+		char* mask = (char*)&frame.masking_key;
+		for (size_t i = 0; i < bytes_read; i++)
+		{
+			payload[i] ^= mask[i % 4];
+		}
+	}	
+
+	return bytes_read;
 }
 
 
-void wss_compute_accept(char key[24], char accept[28])
+void wss_compute_accept(const char key[24], char accept[28])
 {
 	char concat[61];
 	char sha[21];
@@ -170,6 +188,9 @@ int wss_handshake_get_req(
 
 	char* line_saveptr;
 	char* req_str = buf;
+
+	dprintf(STDERR_FILENO, "[REQ] %s\n", req_str);
+
 	for (char* line; (line = strtok_r(req_str, "\r\n", &line_saveptr)); req_str = NULL)
 	{
 
@@ -213,6 +234,44 @@ int wss_handshake_get_req(
 			}
 		}
 	}
+
+	// since this was found to be a good WS handshake, burn the buffer
+	read(sock, buf, bytes_peeked);
+
+	return 0;
+}
+
+
+int wss_handshake_respond(
+	int sock,
+	size_t hdr_count,
+	char* hdrs[],
+	char* accept_key)
+{
+	char buf[1024];
+	char* next = buf;
+
+	if (!accept_key)
+	{ // TODO the server didn't accept the key, respond correctly here
+
+	}
+	else
+	{
+		next += sprintf(next, "HTTP/1.1 101 Switching Protocols\r\n");
+		next += sprintf(next, "Upgrade: websocket\r\n");
+		next += sprintf(next, "Connection: Upgrade\r\n");
+		next += sprintf(next, "Sec-WebSocket-Accept: %20s\r\n", accept_key);
+		
+		for (size_t i = 0; i < hdr_count; i++)
+		{
+			next += sprintf(next, "%s\r\n", hdrs[i]);
+		}		
+	}
+
+	next += sprintf(next, "\r\n");
+
+	write(1, buf, strlen(buf));
+	write(sock, buf, strlen(buf));
 
 	return 0;
 }
