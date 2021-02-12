@@ -83,7 +83,8 @@ int main (int argc, const char* argv[])
 	while(1)
 	{
 		char buf[1024];
-		int bytes = wss_read_frame(client_sock, buf, sizeof(buf));
+		wss_frame_t frame = {};
+		int bytes = wss_read_frame(client_sock, &frame, buf, sizeof(buf));
 		write(STDERR_FILENO, buf, bytes);
 	}
 

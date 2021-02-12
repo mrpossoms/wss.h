@@ -79,35 +79,44 @@ void SHA1(char *hash_out, const char *str, int len);
 void base64_encode(void *dst, const void *src, size_t len);
 
 
-ssize_t wss_read_frame(int sock, void* dst, size_t ex_len)
+void wss_mask_buf(uint32_t masking_key, char* payload, size_t len)
 {
-	wss_frame_t frame;
-	ssize_t frame_bytes = read(sock, &frame.hdr, sizeof(frame.hdr));
+	char* mask = (char*)&masking_key;
+	for (size_t i = 0; i < len; i++)
+	{
+		payload[i] ^= mask[i % 4];
+	}
+}
 
-	if (frame_bytes != sizeof(frame.hdr)) { return -1; /* Something foul happened when reading */ }
 
-	if (frame.hdr.rsv != 0) { return -2; /* non-zero rsv bits should cause a connection failure */}
+ssize_t wss_read_frame(int sock, wss_frame_t* frame_out, void* dst, size_t ex_len)
+{
+	ssize_t frame_bytes = read(sock, &frame_out->hdr, sizeof(frame_out->hdr));
+
+	if (frame_bytes != sizeof(frame_out->hdr)) { return -1; /* Something foul happened when reading */ }
+
+	if (frame_out->hdr.rsv != 0) { return -2; /* non-zero rsv bits should cause a connection failure */}
 
 	// TODO
-	switch (frame.hdr.opcode)
+	switch (frame_out->hdr.opcode)
 	{
 		case WSS_OPCODE_CONT_FRAME:
-			dprintf(STDERR_FILENO, "WSS_OPCODE_CONT_FRAME\n");
+			// dprintf(STDERR_FILENO, "WSS_OPCODE_CONT_FRAME\n");
 			break;
 		case WSS_OPCODE_TEXT_FRAME:
-			dprintf(STDERR_FILENO, "WSS_OPCODE_TEXT_FRAME\n");
+			// dprintf(STDERR_FILENO, "WSS_OPCODE_TEXT_FRAME\n");
 			break;
 		case WSS_OPCODE_BIN_FRAME:
-			dprintf(STDERR_FILENO, "WSS_OPCODE_BIN_FRAME\n");
+			// dprintf(STDERR_FILENO, "WSS_OPCODE_BIN_FRAME\n");
 			break;
 		case WSS_OPCODE_CLOSE_CON:
-			dprintf(STDERR_FILENO, "WSS_OPCODE_CLOSE_CON\n");
+			// dprintf(STDERR_FILENO, "WSS_OPCODE_CLOSE_CON\n");
 			break;
 		case WSS_OPCODE_PING:
-			dprintf(STDERR_FILENO, "WSS_OPCODE_PING\n");
+			// dprintf(STDERR_FILENO, "WSS_OPCODE_PING\n");
 			break;
 		case WSS_OPCODE_PONG:
-			dprintf(STDERR_FILENO, "WSS_OPCODE_PONG\n");
+			// dprintf(STDERR_FILENO, "WSS_OPCODE_PONG\n");
 			break;     
 		default:
 			break;
@@ -115,29 +124,26 @@ ssize_t wss_read_frame(int sock, void* dst, size_t ex_len)
 
 	// determine the payload length and read the appropriate payload
 	// size value.
-	size_t payload_len = frame.hdr.payload_len;
-	if (frame.hdr.payload_len == 126)
+	size_t payload_len = frame_out->hdr.payload_len;
+	if (frame_out->hdr.payload_len == 126)
 	{
-		ssize_t pay_len_bytes = read(sock, &frame.ex_payload_len.len16, sizeof(uint16_t));
+		ssize_t pay_len_bytes = read(sock, &frame_out->ex_payload_len.len16, sizeof(uint16_t));
 
 		if (pay_len_bytes != sizeof(uint16_t)) { return -3; }
-		payload_len = frame.ex_payload_len.len16;
+		payload_len = frame_out->ex_payload_len.len16;
 	}
-	else if (frame.hdr.payload_len == 127)
+	else if (frame_out->hdr.payload_len == 127)
 	{
-		ssize_t pay_len_bytes = read(sock, &frame.ex_payload_len.len64, sizeof(uint64_t));
+		ssize_t pay_len_bytes = read(sock, &frame_out->ex_payload_len.len64, sizeof(uint64_t));
 
 		if (pay_len_bytes != sizeof(uint64_t)) { return -3; }
-		payload_len = frame.ex_payload_len.len64;
+		payload_len = frame_out->ex_payload_len.len64;
 	}
 
 	// since one is specified, read the mask key
-	if (frame.hdr.mask)
+	if (frame_out->hdr.mask)
 	{
-		ssize_t mask_bytes = read(sock, &frame.masking_key, sizeof(uint32_t));
-
-		// frame.masking_key = ntohl(frame.masking_key);
-		dprintf(STDERR_FILENO, "masking_key: %x\n", frame.masking_key);
+		ssize_t mask_bytes = read(sock, &frame_out->masking_key, sizeof(uint32_t));
 		if (mask_bytes != sizeof(uint32_t)) { return -4; }
 	}
 
@@ -145,17 +151,19 @@ ssize_t wss_read_frame(int sock, void* dst, size_t ex_len)
 	size_t bytes_read = read(sock, dst, read_len);
 
 	// if the frame is masked, unmask the payload here
-	if (frame.hdr.mask)
+	if (frame_out->hdr.mask)
 	{
-		char* payload = (char*)dst;
-		char* mask = (char*)&frame.masking_key;
-		for (size_t i = 0; i < bytes_read; i++)
-		{
-			payload[i] ^= mask[i % 4];
-		}
+		wss_mask_buf(frame_out->masking_key, dst, bytes_read);
 	}	
 
 	return bytes_read;
+}
+
+
+ssize_t wss_read(int sock, void* dst, size_t ex_len)
+{
+	wss_frame_t frame = {};
+	return wss_read_frame(sock, &frame, dst, ex_len);
 }
 
 
@@ -188,8 +196,6 @@ int wss_handshake_get_req(
 
 	char* line_saveptr;
 	char* req_str = buf;
-
-	dprintf(STDERR_FILENO, "[REQ] %s\n", req_str);
 
 	for (char* line; (line = strtok_r(req_str, "\r\n", &line_saveptr)); req_str = NULL)
 	{
@@ -265,12 +271,11 @@ int wss_handshake_respond(
 		for (size_t i = 0; i < hdr_count; i++)
 		{
 			next += sprintf(next, "%s\r\n", hdrs[i]);
-		}		
+		}
 	}
 
 	next += sprintf(next, "\r\n");
 
-	write(1, buf, strlen(buf));
 	write(sock, buf, strlen(buf));
 
 	return 0;
