@@ -82,10 +82,21 @@ int main (int argc, const char* argv[])
 
 	while(1)
 	{
-		char buf[1024];
+		char buf[1024] = {};
 		wss_frame_t frame = {};
-		int bytes = wss_read_frame(client_sock, &frame, buf, sizeof(buf));
+		ssize_t bytes = wss_read_frame(client_sock, &frame, buf, sizeof(buf));
+
+		if (bytes < 0)
+		{
+			fprintf(stderr, "READ ERROR\n");
+			return -1;
+		}
 		write(STDERR_FILENO, buf, bytes);
+
+		frame.hdr.mask = 0;
+		char echo_buf[1024] = {};
+		int echo_len = snprintf(echo_buf, sizeof(echo_buf), "echo: %s\n", buf);
+		wss_write_frame(client_sock, frame.hdr, echo_buf, echo_len);
 	}
 
 	return 0;

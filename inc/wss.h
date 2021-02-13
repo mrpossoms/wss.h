@@ -79,6 +79,16 @@ void SHA1(char *hash_out, const char *str, int len);
 void base64_encode(void *dst, const void *src, size_t len);
 
 
+static inline ssize_t _wss_send(int sock, const void* buf, size_t len, int flags)
+{
+#ifndef WSS_H_TEST
+	return send(sock, buf, len, flags);
+#else
+	return write(sock, buf, len);
+#endif
+}
+
+
 void wss_mask_buf(uint32_t masking_key, char* payload, size_t len)
 {
 	char* mask = (char*)&masking_key;
@@ -158,6 +168,90 @@ ssize_t wss_read_frame(int sock, wss_frame_t* frame_out, void* dst, size_t ex_le
 
 	return bytes_read;
 }
+
+
+ssize_t wss_write_frame(int sock, wss_frame_hdr_t hdr, void* src, size_t len)
+{
+	// determine the payload length and update the header
+	// size value.
+	if (len > 0xFFFF)
+	{ // it's bigger than the max value a uint16_t can represent
+	  // use a uint64_t
+		hdr.payload_len = 127;
+	}
+	else if (len > 125)
+	{ // it's bigger than 125, use a uint16_t
+		hdr.payload_len = 126;
+	}
+	else
+	{ // it's <= 125, use the header payload_len
+		hdr.payload_len = (uint8_t)len;
+	}
+
+	// TODO: add an option for random number genration using a proper
+	// source of entropy.
+	// come up with a masking key, send it later
+	uint32_t masking_key = random();
+
+	ssize_t frame_bytes = _wss_send(sock, &hdr, sizeof(hdr), MSG_MORE);
+	if (frame_bytes != sizeof(hdr)) { return -1; /* Something foul happened when reading */ }
+
+	// TODO
+	switch (hdr.opcode)
+	{
+		case WSS_OPCODE_CONT_FRAME:
+			// dprintf(STDERR_FILENO, "WSS_OPCODE_CONT_FRAME\n");
+			break;
+		case WSS_OPCODE_TEXT_FRAME:
+			// dprintf(STDERR_FILENO, "WSS_OPCODE_TEXT_FRAME\n");
+			break;
+		case WSS_OPCODE_BIN_FRAME:
+			// dprintf(STDERR_FILENO, "WSS_OPCODE_BIN_FRAME\n");
+			break;
+		case WSS_OPCODE_CLOSE_CON:
+			// dprintf(STDERR_FILENO, "WSS_OPCODE_CLOSE_CON\n");
+			break;
+		case WSS_OPCODE_PING:
+			// dprintf(STDERR_FILENO, "WSS_OPCODE_PING\n");
+			break;
+		case WSS_OPCODE_PONG:
+			// dprintf(STDERR_FILENO, "WSS_OPCODE_PONG\n");
+			break;     
+		default:
+			break;
+	}
+
+	// determine the payload length and write the appropriate payload
+	// size value.
+	if (hdr.payload_len == 127)
+	{ // it's bigger than the max value a uint16_t can represent
+	  // use a uint64_t
+		uint64_t ext_len = (uint64_t)len;
+		_wss_send(sock, &ext_len, sizeof(ext_len), MSG_MORE);
+	}
+	else if (hdr.payload_len == 126)
+	{ // it's bigger than 125, use a uint16_t
+		uint16_t ext_len = htons((uint16_t)len);
+		_wss_send(sock, &ext_len, sizeof(ext_len), MSG_MORE);
+	}
+
+	// since one is specified, write the masking key, and mask the 
+	if (hdr.mask)
+	{
+		uint32_t mk_swap = htonl(masking_key);
+		ssize_t mask_bytes = _wss_send(sock, &mk_swap, sizeof(uint32_t), MSG_MORE);
+		if (mask_bytes != sizeof(uint32_t)) { return -4; }
+	}
+
+	// if the frame is masked, unmask the payload here
+	if (hdr.mask)
+	{
+		wss_mask_buf(masking_key, src, len);
+	}	
+
+	return _wss_send(sock, src, len, 0);
+}
+
 
 
 ssize_t wss_read(int sock, void* dst, size_t ex_len)
