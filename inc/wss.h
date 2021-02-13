@@ -241,8 +241,10 @@ int wss_handshake_get_req(
 		}
 	}
 
+#ifndef WSS_H_TEST
 	// since this was found to be a good WS handshake, burn the buffer
 	read(sock, buf, bytes_peeked);
+#endif
 
 	return 0;
 }
