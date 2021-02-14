@@ -78,7 +78,11 @@ int main (int argc, const char* argv[])
 	int res = wss_handshake_get_req(client_sock, on_route, on_header, NULL);
 	assert(res == 0);
 
-	wss_handshake_respond(client_sock, 0, NULL, ACCEPT_KEY);
+	char* headers[] = {
+		"Content-Encoding: identity",
+		"Content-Type: application/octet-stream"
+	};
+	wss_handshake_respond(client_sock, 2, headers, ACCEPT_KEY);
 
 	while(1)
 	{

@@ -350,7 +350,7 @@ int wss_handshake_respond(
 	char* hdrs[],
 	char* accept_key)
 {
-	char buf[1024];
+	char buf[1024] = {};
 	char* next = buf;
 
 	if (!accept_key)
