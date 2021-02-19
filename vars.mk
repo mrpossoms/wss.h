@@ -3,7 +3,7 @@
 #   |  _/ '_/ _ \| / -_) _|  _|  \ V / _` | '_(_-<
 #   |_| |_| \___// \___\__|\__|   \_/\__,_|_| /__/
 #              |__/                               
-PROJECT=foo
+PROJECT=wss.h
 TARGET=$(shell ${CC} -dumpmachine)
 
 SRC_OBJS=$(patsubst src/%.c,obj/$(TARGET)/%.c.o,$(wildcard src/*.c))
